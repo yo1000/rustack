@@ -1,9 +1,19 @@
 [package]
 name = "rustack"
 version = "0.1.0"
-authors = ["yo1000 <yoichi.kikuchi.aug@gmail.com>"]
+authors = ["yo1000 <i@yo1000.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+serde = "1.0"
+serde_derive = "1.0"
+
+actix-web = "1.0"
+env_logger = "0.6"
+tera = "0.11"
+
+r2d2 = "0.8.6"
+r2d2_mysql = "16"
+mysql = "16"
