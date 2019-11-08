@@ -2,17 +2,9 @@ extern crate mysql;
 extern crate r2d2;
 extern crate r2d2_mysql;
 
-use std::env;
-use std::sync::Arc;
-
-use mysql::{
-    Opts,
-    OptsBuilder,
-};
 use r2d2_mysql::MysqlConnectionManager;
 
 use self::r2d2::PooledConnection;
-
 
 pub fn query_table_outline(
     mut conn: PooledConnection<MysqlConnectionManager>,

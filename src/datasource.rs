@@ -2,18 +2,14 @@ extern crate r2d2;
 extern crate r2d2_mysql;
 extern crate mysql;
 
-use std::{
-    env,
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use mysql::{
     Opts,
     OptsBuilder,
 };
-use r2d2_mysql::MysqlConnectionManager;
 
-use crate::envvar;
+use r2d2_mysql::MysqlConnectionManager;
 
 pub const DATABASE_HOST: &str = "DATABASE_HOST";
 pub const DATABASE_PORT: &str = "DATABASE_PORT";
@@ -30,7 +26,6 @@ pub struct DataSource {
     pub host: String,
     pub port: u32,
     pub username: String,
-    password: String,
     pub name: String,
     pub conn_url: String,
     pub pool_size: u32,
@@ -62,16 +57,12 @@ impl DataSource {
             name = name,
         );
 
-        let opts = Opts::from_url(&conn_url).unwrap();
-        let builder = OptsBuilder::from_opts(opts);
-        let manager = MysqlConnectionManager::new(builder);
         let conn_pool = conn_pool(&conn_url, pool_size);
 
         let data_source = DataSource {
             host,
             port,
             username,
-            password,
             name,
             pool_size,
             conn_url,
@@ -85,10 +76,10 @@ impl DataSource {
 fn conn_pool(conn_url: &String, pool_size: u32) -> Arc<r2d2::Pool<MysqlConnectionManager>> {
     let opts = Opts::from_url(&conn_url).unwrap();
     let builder = OptsBuilder::from_opts(opts);
-
     let manager = MysqlConnectionManager::new(builder);
 
     Arc::new(r2d2::Pool::builder()
         .max_size(pool_size)
-        .build(manager).unwrap())
+        .build(manager)
+        .unwrap())
 }
