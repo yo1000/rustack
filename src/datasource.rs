@@ -58,16 +58,14 @@ impl DataSource {
 
         let conn_pool = conn_pool(&conn_url, pool_size);
 
-        let data_source = DataSource {
+        DataSource {
             host,
             port,
             username,
             name,
             pool_size,
             conn_pool,
-        };
-
-        data_source
+        }
     }
 }
 
