@@ -27,7 +27,6 @@ pub struct DataSource {
     pub port: u32,
     pub username: String,
     pub name: String,
-    pub conn_url: String,
     pub pool_size: u32,
     pub conn_pool: Arc<r2d2::Pool<MysqlConnectionManager>>,
 }
@@ -65,7 +64,6 @@ impl DataSource {
             username,
             name,
             pool_size,
-            conn_url,
             conn_pool,
         };
 
