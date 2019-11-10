@@ -44,7 +44,7 @@ pub fn query_table_outline(
 
 pub fn query_table(
     mut conn: PooledConnection<MysqlConnectionManager>,
-    schema_name: String,
+    db_name: String,
     table_name: String,
 ) -> Vec<TableDetails> {
     return conn.prep_exec(r#"
@@ -87,13 +87,13 @@ pub fn query_table(
                 AND col.table_name = child.referenced_table_name
                 AND col.column_name = child.referenced_column_name
             WHERE
-                tbl.table_schema = :in_schema_name
+                tbl.table_schema = :in_db_name
             AND tbl.table_name = :in_table_name
             AND tbl.table_type = 'BASE TABLE'
             ORDER BY
                 col.ordinal_position
     "#, params!{
-            "in_schema_name" => schema_name,
+            "in_db_name" => db_name,
             "in_table_name" => table_name,
     }).map::<Vec<TableDetails>, _>(|query_result| {
         let mapped_flat_table_details: HashMap<String, Vec<FlatTableDetails>> = query_result
