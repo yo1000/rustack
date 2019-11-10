@@ -29,7 +29,7 @@
                 <tbody>
                 {% for table in tables %}
                 <tr>
-                    <td><a href="#" th:href="/table/{{ table.name }}">{{ table.name }}</a></td>
+                    <td><a href="/table/{{ table.name }}">{{ table.name }}</a></td>
                     <td>{{ table.column_count }}</td>
                     <td>{{ table.row_count }}</td>
                     <td>{{ table.parent_count }}</td>

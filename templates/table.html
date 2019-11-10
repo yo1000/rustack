@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="_fragments :: head (page='Tables ' + ${dataSourceName})">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tables name | haystacks</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bulma/0.7.1/css/bulma.min.css">
+    <link rel="stylesheet" href="../static/css/haystacks.css" th:href="@{/css/haystacks.css}">
+    <script defer src="https://use.fontawesome.com/releases/v5.1.0/js/all.js"></script>
+</head>
+<body>
+<div th:replace="_fragments :: navbar"></div>
+<section class="section">
+    <div class="container">
+        <h1 id="tableName" class="title is-2">{{ table.table_name }}</h1>
+        <p class="subtitle">
+            <span id="tableComment">{{ table.table_comment }}</span>
+            <small>
+                <span id="tableNote" class="is-data-note-container" attr="data-fqn={{ table.table_fqn }}">
+                    (( table.note ))
+                </span>
+            </small>
+        </p>
+    </div>
+</section>
+<section class="section">
+    <div class="container">
+        <h2 class="title is-4">Columns</h2>
+        <div id="columns">
+            <table class="table is-narrow is-hoverable is-fullwidth is-table-columns">
+                <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Nullable</th>
+                    <th>Default</th>
+                    <th>Parent</th>
+                    <th>Children</th>
+                    <th>Comment</th>
+                    <th>Note</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for column in table.table_columns %}
+                <tr>
+                    <td class="is-table-columns-name">
+                        <div class="is-left"></div>
+                        <div class="is-right">
+                            <span>{{ column.column_name }}</span>
+                        </div>
+                    </td>
+                    <td>{{ column.column_sql_type }}</td>
+                    <td>{% if column.column_nullable == "NO" %}<span class="is-check"></span>{% endif %}</td>
+                    <td>{{ column.column_default }}</td>
+                    <td>
+                        {% if column.parent is defined %}
+                        <span class="is-bullet"></span>
+                        <a class="is-bullet-item" href="{{ column.parent.table_name }}">
+                            {{ column.parent.table_name }}.{{ column.parent.column_name }}
+                        </a>
+                        {% endif %}
+                    </td>
+                    <td class="is-table-columns-children">
+                        <div class="is-ellipsis-shade"></div>
+                        {% if column.children is defined %}
+                        <ul th:if="${not #lists.isEmpty(column.children)}">
+                            {% for child in column.children %}
+                            <li>
+                                <span class="is-bullet"></span>
+                                <a class="is-bullet-item" href="{{ child.table_name }}">
+                                    {{ child.table_name }}.{{ child.column_name }}
+                                </a>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
+                    </td>
+                    <td>{{ column.column_comment }}</td>
+                    <td class="is-data-note-container" th:attr="data-fqn=${column.fqn}" th:text="${column.note}">
+                    <td class="is-data-note-container" th:attr="data-fqn=${column.fqn}" th:text="${column.note}">
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<div th:replace="_fragments :: scripts">
+    <script src="../static/js/haystacks.js"></script>
+</div>
+<script th:inline="javascript">
+    (function () {
+        hljs.initHighlightingOnLoad()
+
+        document.querySelectorAll(".is-data-note-container").forEach((elm) => {
+            elm.appendChildNote(elm.textContent)
+        })
+    })()
+</script>
+</body>
+</html>

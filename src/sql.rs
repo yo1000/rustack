@@ -5,8 +5,10 @@ extern crate r2d2_mysql;
 use r2d2_mysql::MysqlConnectionManager;
 use self::r2d2::PooledConnection;
 
-use itertools::Itertools;
-use std::collections::HashMap;
+use mysql::{
+    Row,
+    prelude::FromValue
+};
 
 pub fn query_table_outline(
     mut conn: PooledConnection<MysqlConnectionManager>,
@@ -42,143 +44,225 @@ pub fn query_table_outline(
         }).unwrap();
 }
 
+fn query_flat_table(
+    conn: &mut PooledConnection<MysqlConnectionManager>,
+    db_name: &String,
+    table_name: &String,
+) -> Vec<FlatTable> {
+    conn.prep_exec(r#"
+        SELECT
+            tbl.table_name                AS out_table_name,
+            tbl.table_comment             AS out_table_comment,
+            CONCAT(
+                tbl.table_schema, '.',
+                tbl.table_name
+            )                             AS out_table_fqn,
+            tbl.table_rows                AS out_table_rows,
+            col.column_name               AS out_column_name,
+            col.column_comment            AS out_column_comment,
+            CONCAT(
+                tbl.table_schema, '.',
+                tbl.table_name  , '.',
+                col.column_name
+            )                             AS out_column_fqn,
+            col.column_type               AS out_column_sql_type,
+            col.is_nullable               AS out_column_nullable,
+            col.column_default            AS out_column_default
+        FROM
+            information_schema.tables tbl
+        INNER JOIN
+            information_schema.columns col
+            ON  tbl.table_schema = col.table_schema
+            AND tbl.table_name = col.table_name
+        WHERE
+            tbl.table_schema = :in_db_name
+        AND tbl.table_name = :in_table_name
+        AND tbl.table_type = 'BASE TABLE'
+        ORDER BY
+            col.ordinal_position
+    "#, params!{
+        "in_db_name" => db_name,
+        "in_table_name" => table_name,
+    }).map::<Vec<FlatTable>, _>(|query_result| {
+        query_result
+            .map(|result| result.unwrap())
+            .map(|r| {
+                FlatTable {
+                    table_name: take_val::<String>(&r, "out_table_name"),
+                    table_comment: take_nullable_val::<String>(&r, "out_table_comment"),
+                    table_fqn: take_val::<String>(&r, "out_table_fqn"),
+                    table_rows: take_val::<u64>(&r, "out_table_rows"),
+                    column_name: take_val::<String>(&r, "out_column_name"),
+                    column_comment: take_nullable_val::<String>(&r, "out_column_comment"),
+                    column_fqn: take_val::<String>(&r, "out_column_fqn"),
+                    column_sql_type: take_val::<String>(&r, "out_column_sql_type"),
+                    column_nullable: take_val::<String>(&r, "out_column_nullable"),
+                    column_default: take_nullable_val::<String>(&r, "out_column_default"),
+                }
+            })
+            .collect()
+    }).unwrap()
+}
+
+fn query_column_parent(
+    conn: &mut PooledConnection<MysqlConnectionManager>,
+    db_name: &String,
+    table_name: &String,
+    column_name: &String,
+) -> Option<Relation> {
+    let parent_result = conn.prep_exec(r#"
+        SELECT
+            parent.referenced_table_name  AS out_parent_table_name,
+            parent.referenced_column_name AS out_parent_column_name
+        FROM
+            information_schema.key_column_usage parent
+        WHERE
+            parent.table_schema = :in_db_name
+        AND parent.table_name   = :in_table_name
+        AND parent.column_name  = :in_column_name
+        ORDER BY
+            parent.referenced_table_name ASC,
+            parent.referenced_column_name ASC
+    "#, params!{
+        "in_db_name" => db_name,
+        "in_table_name" => table_name,
+        "in_column_name" => column_name,
+    }).map::<Option<Relation>, _>(|query_result| {
+        let rel: Vec<Option<Relation>> = query_result
+            .map(|result| result.unwrap())
+            .map(|r| {
+                let parent_table_name = take_nullable_val::<String>(&r, "out_parent_table_name");
+                let parent_column_name = take_nullable_val::<String>(&r, "out_parent_column_name");
+
+                match (parent_table_name, parent_column_name) {
+                    (Some(t), Some(c)) => Some(Relation {
+                        table_name: t,
+                        column_name: c,
+                    }),
+                    _ => None,
+                }
+            }).collect();
+
+        match rel.first() {
+            Some(r) => r.clone(),
+            _ => None
+        }
+    });
+
+    match parent_result {
+        Ok(t) => t.clone(),
+        _ => None,
+    }
+}
+
+fn query_column_children(
+    conn: &mut PooledConnection<MysqlConnectionManager>,
+    db_name: &String,
+    table_name: &String,
+    column_name: &String,
+) -> Vec<Relation> {
+    let children_result = conn.prep_exec(r#"
+        SELECT
+            child.table_name    AS out_child_table_name,
+            child.column_name   AS out_child_column_name
+        FROM
+            information_schema.key_column_usage child
+        WHERE
+                child.table_schema              = :in_db_name
+            AND child.referenced_table_name     = :in_table_name
+            AND child.referenced_column_name    = :in_column_name
+        ORDER BY
+            child.table_name ASC,
+            child.column_name ASC
+    "#, params!{
+        "in_db_name" => db_name,
+        "in_table_name" => table_name,
+        "in_column_name" => column_name,
+    }).map::<Vec<Relation>, _>(|query_result| {
+        query_result
+            .map(|result| result.unwrap())
+            .map(|r| {
+                Relation {
+                    table_name: take_val::<String>(&r, "out_child_table_name"),
+                    column_name: take_val::<String>(&r, "out_child_column_name")
+                }
+            }).collect()
+    });
+
+    match children_result {
+        Ok(t) => t.clone(),
+        _ => vec![],
+    }
+}
+
 pub fn query_table(
     mut conn: PooledConnection<MysqlConnectionManager>,
     db_name: String,
     table_name: String,
-) -> Vec<TableDetails> {
-    return conn.prep_exec(r#"
-            SELECT
-                tbl.table_name                AS out_table_name,
-                tbl.table_comment             AS out_table_comment,
-                CONCAT(
-                    tbl.table_schema, '.',
-                    tbl.table_name
-                )                             AS out_table_fqn,
-                tbl.table_rows                AS out_table_rows,
-                col.column_name               AS out_column_name,
-                col.column_comment            AS out_column_comment,
-                CONCAT(
-                    tbl.table_schema, '.',
-                    tbl.table_name  , '.',
-                    col.column_name
-                )                             AS out_column_fqn,
-                col.column_type               AS out_column_sql_type,
-                col.is_nullable               AS out_column_nullable,
-                col.column_default            AS out_column_default,
-                parent.referenced_table_name  AS out_parent_table_name,
-                parent.referenced_column_name AS out_parent_column_name,
-                child.table_name              AS out_child_table_name,
-                child.column_name             AS out_child_column_name
-            FROM
-                information_schema.tables tbl
-            INNER JOIN
-                information_schema.columns col
-                ON  tbl.table_schema = col.table_schema
-                AND tbl.table_name = col.table_name
-            LEFT OUTER JOIN
-                information_schema.key_column_usage parent
-                ON  col.table_schema = parent.table_schema
-                AND col.table_name = parent.table_name
-                AND col.column_name = parent.column_name
-            LEFT OUTER JOIN
-                information_schema.key_column_usage child
-                ON  col.table_schema = child.table_schema
-                AND col.table_name = child.referenced_table_name
-                AND col.column_name = child.referenced_column_name
-            WHERE
-                tbl.table_schema = :in_db_name
-            AND tbl.table_name = :in_table_name
-            AND tbl.table_type = 'BASE TABLE'
-            ORDER BY
-                col.ordinal_position
-    "#, params!{
-            "in_db_name" => db_name,
-            "in_table_name" => table_name,
-    }).map::<Vec<TableDetails>, _>(|query_result| {
-        let mapped_flat_table_details: HashMap<String, Vec<FlatTableDetails>> = query_result
-            .map( |result| result.unwrap())
-            .map(|row| {
-                let mut r = row;
-                FlatTableDetails {
-                    table_name          : r.take("out_table_name").unwrap(),
-                    table_comment       : r.take("out_table_comment"),
-                    table_fqn           : r.take("out_table_fqn").unwrap(),
-                    table_rows          : r.take("out_table_rows").unwrap(),
-                    column_name         : r.take("out_column_name").unwrap(),
-                    column_comment      : r.take("out_column_comment"),
-                    column_fqn          : r.take("out_column_fqn").unwrap(),
-                    column_sql_type     : r.take("out_column_sql_type").unwrap(),
-                    column_nullable     : r.take("out_column_nullable").unwrap(),
-                    column_default      : r.take("out_column_default"),
-                    parent_table_name   : r.take("out_parent_table_name"),
-                    parent_column_name  : r.take("out_parent_column_name"),
-                    child_table_name    : r.take("out_child_table_name"),
-                    child_column_name   : r.take("out_child_column_name"),
-                }
-            })
-            .map(|details: FlatTableDetails| {
-                let d = details.clone();
-                (d.clone().table_fqn, d)
-            })
-            .into_group_map();
+) -> Option<Table> {
+    let flat_tables = query_flat_table(&mut conn, &db_name, &table_name);
 
-        mapped_flat_table_details
-            .into_iter()
-            .map(|(k, v)| {
-                let first = v.get(0).unwrap();
-                let f = first.clone();
-                let parent = match (f.parent_table_name, f.parent_column_name) {
-                    (Some(table_name), Some(column_name)) => Some(Relation {
-                        table_name,
-                        column_name,
-                    }),
-                    _ => None
-                };
-                let children = v.iter().map(|flat| {
-                    let f = flat.clone();
-                    match (f.child_table_name, f.child_column_name) {
-                        (Some(table_name), Some(column_name)) => {
-                            Some(Relation {
-                                table_name,
-                                column_name,
-                            })
-                        },
-                        _ => None
-                    } })
-                    .filter(|relation| match relation {
-                        Some(_) => true,
-                        _ => false
-                    })
-                    .map(|relation| relation.unwrap())
-                    .collect();
+    let first = match flat_tables.first() {
+        Some(t) => t.clone(),
+        _ => return None,
+    };
 
-                TableDetails {
-                    table_name: f.table_name,
-                    table_comment: f.table_comment,
-                    table_fqn: f.table_fqn,
-                    table_rows: f.table_rows,
-                    columns: v.iter().map(|flat| {
-                        let f = flat.clone();
-                        Column {
-                            column_name: f.column_name,
-                            column_comment: f.column_comment,
-                            column_fqn: f.column_fqn,
-                            column_sql_type: f.column_sql_type,
-                            column_nullable: f.column_nullable,
-                            column_default: f.column_default,
-                        }
-                    }).collect(),
-                    parent,
-                    children,
-                }
-            })
-            .collect()
-    }).unwrap();
+    Some(Table {
+        table_name: first.table_name,
+        table_comment: first.table_comment,
+        table_fqn: first.table_fqn,
+        table_rows: first.table_rows,
+        table_columns: flat_tables.iter().map(|flat| {
+            let f = flat.clone();
+            let column_name = f.column_name;
+            let parent = query_column_parent(&mut conn, &db_name, &table_name, &column_name);
+            let children = query_column_children(&mut conn, &db_name, &table_name, &column_name);
+            Column {
+                column_name,
+                column_comment: f.column_comment,
+                column_fqn: f.column_fqn,
+                column_sql_type: f.column_sql_type,
+                column_nullable: f.column_nullable,
+                column_default: f.column_default,
+                column_parent: parent,
+                column_children: children,
+            }
+        }).collect(),
+    })
+}
+
+fn take_val<T>(row: &Row, index: &str) -> T where T: FromValue {
+    row.get::<T, &str>(index).unwrap()
+}
+
+fn take_nullable_val<T>(row: &Row, index: &str) -> Option<T> where T: FromValue {
+    match row.get_opt::<T, &str>(index) {
+        Some(a) => {
+            match a {
+                Ok(b) => Some(b),
+                _ => None,
+            }
+        },
+        _ => None,
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct TableRelations {
+    pub table: Table,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct Table {
+    pub table_name: String,
+    pub table_comment: Option<String>,
+    pub table_fqn: String,
+    pub table_rows: u64,
+    pub table_columns: Vec<Column>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct FlatTableDetails {
+pub struct FlatTable {
     pub table_name: String,
     pub table_comment: Option<String>,
     pub table_fqn: String,
@@ -189,24 +273,9 @@ pub struct FlatTableDetails {
     pub column_sql_type: String,
     pub column_nullable: String,
     pub column_default: Option<String>,
-    pub parent_table_name: Option<String>,
-    pub parent_column_name: Option<String>,
-    pub child_table_name: Option<String>,
-    pub child_column_name: Option<String>,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct TableDetails {
-    pub table_name: String,
-    pub table_comment: Option<String>,
-    pub table_fqn: String,
-    pub table_rows: u64,
-    pub columns: Vec<Column>,
-    pub parent: Option<Relation>,
-    pub children: Vec<Relation>,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Column {
     pub column_name: String,
     pub column_comment: Option<String>,
@@ -214,9 +283,11 @@ pub struct Column {
     pub column_sql_type: String,
     pub column_nullable: String,
     pub column_default: Option<String>,
+    pub column_parent: Option<Relation>,
+    pub column_children: Vec<Relation>,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Relation {
     pub table_name: String,
     pub column_name: String,

@@ -41,6 +41,7 @@ fn main() {
             })
             .wrap(middleware::Logger::default())
             .service(handler::get_tables)
+            .service(handler::get_table_by_name)
     })
     .bind("127.0.0.1:8088")
     .unwrap()
