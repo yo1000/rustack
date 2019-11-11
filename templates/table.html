@@ -53,18 +53,17 @@
                     <td>{% if column.column_nullable == "NO" %}<span class="is-check"></span>{% endif %}</td>
                     <td>{{ column.column_default }}</td>
                     <td>
-                        {% if column.parent is defined %}
+                        {% if column.column_parent.table_name is defined %}
                         <span class="is-bullet"></span>
-                        <a class="is-bullet-item" href="{{ column.parent.table_name }}">
-                            {{ column.parent.table_name }}.{{ column.parent.column_name }}
+                        <a class="is-bullet-item" href="{{ column.column_parent.table_name }}">
+                            {{ column.column_parent.table_name }}.{{ column.column_parent.column_name }}
                         </a>
                         {% endif %}
                     </td>
                     <td class="is-table-columns-children">
                         <div class="is-ellipsis-shade"></div>
-                        {% if column.children is defined %}
-                        <ul th:if="${not #lists.isEmpty(column.children)}">
-                            {% for child in column.children %}
+                        <ul>
+                            {% for child in column.column_children %}
                             <li>
                                 <span class="is-bullet"></span>
                                 <a class="is-bullet-item" href="{{ child.table_name }}">
@@ -73,12 +72,9 @@
                             </li>
                             {% endfor %}
                         </ul>
-                        {% endif %}
                     </td>
                     <td>{{ column.column_comment }}</td>
-                    <td class="is-data-note-container" th:attr="data-fqn=${column.fqn}" th:text="${column.note}">
-                    <td class="is-data-note-container" th:attr="data-fqn=${column.fqn}" th:text="${column.note}">
-                    </td>
+                    <td class="is-data-note-container" th:attr="data-fqn=${column.fqn}" th:text="${column.note}"></td>
                 </tr>
                 {% endfor %}
                 </tbody>
