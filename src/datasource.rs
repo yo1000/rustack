@@ -1,6 +1,6 @@
+extern crate mysql;
 extern crate r2d2;
 extern crate r2d2_mysql;
-extern crate mysql;
 
 use std::sync::Arc;
 
@@ -8,7 +8,6 @@ use mysql::{
     Opts,
     OptsBuilder,
 };
-
 use r2d2_mysql::MysqlConnectionManager;
 
 pub const DATABASE_HOST: &str = "DATABASE_HOST";

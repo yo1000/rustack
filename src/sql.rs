@@ -2,16 +2,19 @@ extern crate mysql;
 extern crate r2d2;
 extern crate r2d2_mysql;
 
+use std::collections::HashMap;
+
+use itertools::Itertools;
+use mysql::{
+    prelude::FromValue,
+    Row
+};
 use r2d2_mysql::MysqlConnectionManager;
+
 use self::r2d2::PooledConnection;
 
-use mysql::{
-    Row,
-    prelude::FromValue
-};
-
 pub fn query_table_outline(
-    mut conn: PooledConnection<MysqlConnectionManager>,
+    conn: &mut PooledConnection<MysqlConnectionManager>,
     param: String
 ) -> Vec<TableOutlineResult> {
     return conn.prep_exec(r#"
@@ -41,6 +44,120 @@ pub fn query_table_outline(
                         table_fqn,
                     }
                 }).collect()
+        }).unwrap();
+}
+
+pub fn query_table_size_map(
+    conn: &mut PooledConnection<MysqlConnectionManager>,
+    param: String
+) -> HashMap<String, TableSizeResult> {
+    return conn.prep_exec(r#"
+            SELECT
+                tbl.table_name          AS table_name,
+                count(col.column_name)  AS column_count,
+                tbl.table_rows          AS row_count
+            FROM
+                information_schema.tables tbl
+            INNER JOIN
+                information_schema.columns col
+                    ON  tbl.table_schema  = col.table_schema
+                    AND tbl.table_name    = col.table_name
+            WHERE
+                tbl.table_schema  = :param_schema_name
+            AND tbl.table_type    = 'BASE TABLE'
+            GROUP BY
+                tbl.table_name,
+                tbl.table_rows
+            "#, params!{
+                "param_schema_name" => param
+            })
+        .map::<HashMap<String, TableSizeResult>, _>(|result| {
+            let size_result_vec: Vec<_> = result
+                .map(|x| x.unwrap())
+                .map(|row| {
+                    let (table_name, columns, rows) = mysql::from_row(row);
+                    (table_name, TableSizeResult {
+                        columns,
+                        rows,
+                    })
+                }).collect_vec();
+
+            size_result_vec.to_vec().into_iter().collect()
+        }).unwrap();
+}
+
+pub fn query_table_referencing_count_to_parent_map(
+    conn: &mut PooledConnection<MysqlConnectionManager>,
+    param: String
+) -> HashMap<String, u32> {
+    return conn.prep_exec(r#"
+            SELECT
+                table_name      AS table_name,
+                sum(col_count)  AS ref_count
+            FROM
+                (
+                    SELECT
+                        table_name,
+                        count(referenced_column_name) AS col_count
+                    FROM
+                        information_schema.key_column_usage
+                    WHERE
+                        table_schema = :param_schema_name
+                    GROUP BY
+                        table_name, referenced_table_name
+                ) parent_col
+            GROUP BY
+                table_name
+            "#, params!{
+                "param_schema_name" => param
+            })
+        .map::<HashMap<String, u32>, _>(|result| {
+            let size_result_vec: Vec<_> = result
+                .map(|x| x.unwrap())
+                .map(|row| {
+                    let (table_name, ref_count) = mysql::from_row(row);
+                    (table_name, ref_count)
+                }).collect_vec();
+
+            size_result_vec.to_vec().into_iter().collect()
+        }).unwrap();
+}
+
+pub fn query_table_referenced_count_from_children_map(
+    conn: &mut PooledConnection<MysqlConnectionManager>,
+    param: String
+) -> HashMap<String, u32> {
+    return conn.prep_exec(r#"
+            SELECT
+                table_name AS table_name,
+                sum(count) AS ref_count
+            FROM
+                (
+                    SELECT
+                        referenced_table_name   AS table_name,
+                        count(column_name)      AS count
+                    FROM
+                        information_schema.key_column_usage
+                    WHERE
+                        table_schema = :param_schema_name
+                    AND referenced_table_name IS NOT NULL
+                    GROUP BY
+                        referenced_table_name, table_name
+                ) child_col
+            GROUP BY
+                table_name
+            "#, params!{
+                "param_schema_name" => param
+            })
+        .map::<HashMap<String, u32>, _>(|result| {
+            let size_result_vec: Vec<_> = result
+                .map(|x| x.unwrap())
+                .map(|row| {
+                    let (table_name, ref_count) = mysql::from_row(row);
+                    (table_name, ref_count)
+                }).collect_vec();
+
+            size_result_vec.to_vec().into_iter().collect()
         }).unwrap();
 }
 
@@ -298,4 +415,10 @@ pub struct TableOutlineResult {
     pub table_name: String,
     pub table_comment: Option<String>,
     pub table_fqn: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct TableSizeResult {
+    pub columns: u32,
+    pub rows: u64,
 }
